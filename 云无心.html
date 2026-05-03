@@ -39,7 +39,9 @@
             padding: 10px;
             font-family: var(--font-main);
             font-size: 15px;
+            transition: all 0.6s ease;
             min-height: 100vh;
+            background-attachment: fixed;
         }
 
         body.pure-mode {
@@ -1569,16 +1571,14 @@
         }
 
         @keyframes liquid-wave {
-            0%, 100% { transform: translateX(0); }
-        }
-        @keyframes capacity-pulse {
-            0%, 100% { opacity: 1; }
-        }
-        @keyframes fire-flicker {
-            0%, 100% { opacity: 1; }
-        }
-        @keyframes womb-glow {
-            0%, 100% { opacity: 0.1; }
+            0%, 100% { 
+                background: linear-gradient(to top, #ff1493, #ff69b4, #ffb6c1);
+                transform: translateX(0);
+            }
+            50% { 
+                background: linear-gradient(to top, #dc143c, #ff1493, #ff69b4);
+                transform: translateX(2px);
+            }
         }
 
         .capacity-info {
@@ -2128,74 +2128,68 @@
             }
         }
 
-        // 新增：切换角色可见性 - 修复：添加UI同步和错误处理
+        // 极速切换角色可见性（绝不卡顿版）
         function toggleCharacterVisibility(character) {
-            // 确保character在allCharacters列表中
-            if (!allCharacters.includes(character)) {
-                addDebugLog('error', `尝试切换未知角色: ${character}`);
-                return;
-            }
-            // 切换状态
-            const oldValue = characterVisibility[character];
+            if (!allCharacters.includes(character)) return;
+            
             characterVisibility[character] = !characterVisibility[character];
-            const newValue = characterVisibility[character];
-            // 检查是否所有角色都被隐藏，如果是则自动全部显示，防止全空
-            const anyVisible = allCharacters.some(c => characterVisibility[c]);
-            if (!anyVisible) {
-                allCharacters.forEach(c => characterVisibility[c] = true);
-            }
-            // 立即更新UI中的复选框状态
+            
             const checkbox = document.getElementById(`visibility-${character}`);
             if (checkbox) {
                 checkbox.checked = characterVisibility[character];
-                // 更新状态指示器
                 const statusSpan = checkbox.parentElement.querySelector('span:last-child');
                 if (statusSpan) {
                     statusSpan.textContent = characterVisibility[character] ? '✅' : '❌';
                 }
             }
-            // 保存到localStorage
+            
+            const anyVisible = allCharacters.some(c => characterVisibility[c]);
+            if (!anyVisible) {
+                allCharacters.forEach(c => characterVisibility[c] = true);
+                renderPanel(); // 全空时强制重画兜底
+                return;
+            }
+            
             saveCharacterVisibility();
-            // 重新渲染面板
-            renderPanel();
+            // 关键优化：只改显示隐藏，不重建整个页面，0延迟！
+            filterDisplay(); 
         }
 
-        // 新增：过滤显示函数（参考备份.html的正确实现）
+        // 新增：过滤显示函数（完美修复版）
         function filterDisplay() {
-            const toggleBtn = document.getElementById('changes-toggle-btn');
-            const showChangesOnly = toggleBtn.classList.contains('active');
-            
-            document.querySelectorAll('.section').forEach(section => {
-                const sectionKey = section.dataset.key;
-                let hasVisibleProperty = false;
+            const searchTerm = document.getElementById('search-input')?.value.toLowerCase() || '';
+            const sections = document.querySelectorAll('.section');
+
+            sections.forEach(section => {
+                const charName = section.getAttribute('data-key');
+                if (!charName) return;
                 
-                if (showChangesOnly && changedKeys.size > 0) {
-                    // 只显示变更模式
-                    if (!changedKeys.has(sectionKey)) {
-                        section.style.display = 'none';
-                        return;
-                    }
-                    
-                    // 检查每个属性是否有变更
-                    section.querySelectorAll('.property').forEach(prop => {
-                        const propKey = prop.dataset.key; // 注意：使用data-key而不是data-prop
-                        const propHasChanged = deltaData[sectionKey] && (deltaData[sectionKey][propKey] !== undefined);
-                        
-                        if (propHasChanged) {
+                const charNameLower = charName.toLowerCase();
+                const isVisibleByToggle = characterVisibility[charName] !== false;
+                const isVisibleBySearch = charNameLower.includes(searchTerm);
+
+                if (isVisibleByToggle && isVisibleBySearch) {
+                    if (showChangedOnly) {
+                        let hasVisibleProperty = false;
+                        section.querySelectorAll('.property').forEach(prop => {
+                            const propKey = prop.dataset.key;
+                            const propHasChanged = deltaData[charName] && (deltaData[charName][propKey] !== undefined);
+                            if (propHasChanged) {
+                                prop.style.display = '';
+                                hasVisibleProperty = true;
+                            } else {
+                                prop.style.display = 'none';
+                            }
+                        });
+                        section.style.display = hasVisibleProperty ? 'block' : 'none';
+                    } else {
+                        section.style.display = 'block';
+                        section.querySelectorAll('.property').forEach(prop => {
                             prop.style.display = '';
-                            hasVisibleProperty = true;
-                        } else {
-                            prop.style.display = 'none';
-                        }
-                    });
-                    
-                    section.style.display = hasVisibleProperty ? '' : 'none';
+                        });
+                    }
                 } else {
-                    // 显示所有内容模式
-                    section.style.display = '';
-                    section.querySelectorAll('.property').forEach(prop => {
-                        prop.style.display = '';
-                    });
+                    section.style.display = 'none';
                 }
             });
         }
@@ -3549,59 +3543,22 @@
             renderPanel();
         }
 
-        // 渲染面板
+        // 核心渲染函数（完全修复版）
         function renderPanel() {
             const container = document.getElementById('sections-container');
-            container.innerHTML = '';
-            
-            // 获取当前定义（已经过滤了不可见的角色）
+            if (!container) return;
+
             const currentDefs = getCurrentDefinitions();
-            
-            addDebugLog('info', `渲染面板: ${currentPanelMode}模式，显示${currentDefs.length}个角色`, {
-                mode: currentPanelMode,
-                visible_characters: currentDefs.map(def => def.key),
-                visibility_settings: characterVisibility
-            });
-            
-            currentDefs.forEach(def => {
-                if (currentCharacterData[def.key]) {
-                    container.innerHTML += createSectionHTML(def);
-                } else {
-                    addDebugLog('warning', `角色 ${def.key} 的数据不存在`, {
-                        available_sections: Object.keys(currentCharacterData)
-                    });
-                }
-            });
-            
-            // 如果没有可见的角色，显示提示信息
+
             if (currentDefs.length === 0) {
                 container.innerHTML = `
-                    <div style="
-                        text-align: center;
-                        padding: 40px 20px;
-                        color: var(--pure-secondary);
-                        font-size: 1.1em;
-                        background: rgba(25, 30, 45, 0.6);
-                        border: 2px dashed var(--pure-border);
-                        border-radius: 12px;
-                        margin: 20px;
-                    ">
+                    <div style="text-align: center; padding: 40px 20px; color: var(--pure-secondary); font-size: 1.1em; background: rgba(25, 30, 45, 0.6); border: 2px dashed var(--pure-border); border-radius: 12px; margin: 20px;">
                         <div style="font-size: 2em; margin-bottom: 15px; opacity: 0.7;">👥</div>
                         <div style="margin-bottom: 10px; font-weight: 600;">暂无可显示的角色</div>
                         <div style="font-size: 0.9em; opacity: 0.8; margin-bottom: 20px;">
                             所有角色都已隐藏，请点击右上角的"👥"按钮进行设置
                         </div>
-                        <button onclick="showCharacterSettings()" style="
-                            padding: 10px 20px;
-                            background: var(--pure-accent);
-                            color: white;
-                            border: none;
-                            border-radius: 8px;
-                            cursor: pointer;
-                            font-size: 0.9em;
-                            font-weight: 600;
-                            transition: all 0.3s ease;
-                        " onmouseover="this.style.background='#4682b4';" onmouseout="this.style.background='var(--pure-accent)';">
+                        <button onclick="showCharacterSettings()" style="padding: 10px 20px; background: var(--pure-accent); color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 0.9em; font-weight: 600;">
                             📝 角色设置
                         </button>
                     </div>
@@ -3609,7 +3566,14 @@
                 return;
             }
             
-            // 填充数据
+            // 拼装所有角色的 HTML
+            let html = '';
+            currentDefs.forEach(def => {
+                html += createSectionHTML(def);
+            });
+            container.innerHTML = html;
+            
+            // 延迟填充数据，防止阻塞UI渲染
             setTimeout(() => {
                 currentDefs.forEach(def => {
                     if (currentCharacterData[def.key]) {
@@ -3619,8 +3583,7 @@
                     }
                 });
                 restoreExpandedSections();
-                // 渲染完成后调用过滤显示
-                filterDisplay();
+                filterDisplay(); // 渲染完后，应用隐藏/只看变更逻辑
             }, 50);
         }
 
@@ -3784,32 +3747,12 @@
             }
         }
 
-        // 核心性能修复：防止酒馆历史消息堆积导致的卡顿与 ID 冲突
-        setTimeout(() => {
-            // 1. 清理旧消息中的状态栏，释放海量内存
-            const allCards = document.querySelectorAll('.status-card');
-            if (allCards.length > 1) {
-                // 遍历除了最后一个（最新生成）之外的所有旧状态栏
-                for (let i = 0; i < allCards.length - 1; i++) {
-                    // 把旧的庞大DOM树直接砍掉，替换为极简文本
-                    allCards[i].innerHTML = '<div style="text-align:center; padding:8px; color:rgba(255,20,147,0.5); font-size:12px; border:1px dashed rgba(255,20,147,0.3); border-radius:8px; background:rgba(0,0,0,0.5);">[ 历史状态栏已自动折叠以提升性能 ]</div>';
-                    // 移除类名和ID，防止接下来的 JS 获取到错误的旧元素
-                    allCards[i].removeAttribute('id');
-                    allCards[i].classList.remove('status-card'); 
-                }
-            }
-
-            // 2. 只为最新生成的状态栏绑定事件和渲染
-            const toggleBtn = document.getElementById('changes-toggle-btn');
-            if (toggleBtn && !toggleBtn.hasAttribute('data-bound')) {
-                toggleBtn.addEventListener('click', toggleChangesOnly);
-                toggleBtn.setAttribute('data-bound', 'true');
-            }
+        // 事件监听
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('changes-toggle-btn').addEventListener('click', toggleChangesOnly);
             
-            if (document.getElementById('sections-container')) {
-                initDisplay();
-            }
-        }, 150); // 延迟 150ms，确保 DOM 已被酒馆完全插入
+            initDisplay();
+        });
 
         // 全局函数（供onclick使用）
         window.toggleSection = toggleSection;
